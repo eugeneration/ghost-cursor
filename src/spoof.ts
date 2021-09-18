@@ -249,7 +249,7 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
       const dimensions = { height, width }
       const overshooting = shouldOvershoot(previous, destination) && !((options?.noOvershoot) ?? false)
       const to = overshooting ? overshoot(destination, overshootRadius) : destination
-      await tracePath(path(previous, to))
+      await tracePath(path(previous, to, options))
 
       if (overshooting) {
         const correction = path(to, { ...dimensions, ...destination }, { ...options, spreadMultiplier: 0.2 })
@@ -260,9 +260,9 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
 
       actions.toggleRandomMove(true)
     },
-    async moveTo (destination: Vector): Promise<void> {
+    async moveTo (destination: Vector, options?: PathOptions): Promise<void> {
       actions.toggleRandomMove(false)
-      await tracePath(path(previous, destination))
+      await tracePath(path(previous, destination, options))
       actions.toggleRandomMove(true)
     }
   }
