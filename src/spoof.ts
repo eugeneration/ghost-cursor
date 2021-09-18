@@ -3,10 +3,16 @@ import { Vector, bezierCurve, direction, magnitude, origin, overshoot } from './
 export { default as installMouseHelper } from './mouse-helper'
 
 interface BoxOptions { readonly paddingPercentage: number }
-interface MoveOptions extends BoxOptions { readonly waitForSelector: number, readonly moveDelay?: number }
+interface PathOptions {
+  readonly stepsMultiplier?: number
+  readonly spreadMultiplier?: number
+  readonly noOvershoot?: boolean
+}
+interface MoveOptions extends BoxOptions, PathOptions {readonly waitForSelector: number, readonly moveDelay?: number }
 interface ClickOptions extends MoveOptions { readonly waitForClick: number }
 export interface GhostCursor {
   toggleRandomMove: (random: boolean) => void
+  setPrevious: (coordinates: Vector) => void
   click: (selector?: string | ElementHandle, options?: ClickOptions) => Promise<void>
   move: (selector: string | ElementHandle, options?: MoveOptions) => Promise<void>
   moveTo: (destination: Vector) => Promise<void>
@@ -87,16 +93,20 @@ const getElementBox = async (page: Page, element: ElementHandle, relativeToMainF
   }
 }
 
-export function path (point: Vector, target: Vector, spreadOverride?: number)
-export function path (point: Vector, target: BoundingBox, spreadOverride?: number)
-export function path (start: Vector, end: BoundingBox | Vector, spreadOverride?: number): Vector[] {
+function randomRange (min: number, max: number): number {
+  return Math.random() * (max - min) + min
+}
+
+export function path (point: Vector, target: Vector, options?: PathOptions)
+export function path (point: Vector, target: BoundingBox, options?: PathOptions)
+export function path (start: Vector, end: BoundingBox | Vector, options?: PathOptions): Vector[] {
   const defaultWidth = 100
-  const minSteps = 25
+  const minSteps = 10
   const width = 'width' in end ? end.width : defaultWidth
-  const curve = bezierCurve(start, end, spreadOverride)
+  const curve = bezierCurve(start, end, options?.spreadMultiplier)
   const length = curve.length() * 0.8
-  const baseTime = Math.random() * minSteps
-  const steps = Math.ceil((Math.log2(fitts(length, width) + 1) + baseTime) * 3)
+  const baseTime = randomRange(0.5, 1) * minSteps
+  const steps = Math.ceil((Math.log2(fitts(length, width) + 1) + baseTime) * 3 * (options?.stepsMultiplier ?? 1))
   const re = curve.getLUT(steps)
   return clampPositive(re)
 }
@@ -115,8 +125,6 @@ const overshootThreshold = 500
 const shouldOvershoot = (a: Vector, b: Vector): boolean => magnitude(direction(a, b)) > overshootThreshold
 
 export const createCursor = (page: Page, start: Vector = origin, performRandomMoves: boolean = false): GhostCursor => {
-  // this is kind of arbitrary, not a big fan but it seems to work
-  const overshootSpread = 10
   const overshootRadius = 120
   let previous: Vector = start
 
@@ -164,11 +172,13 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
     toggleRandomMove (random: boolean): void {
       moving = !random
     },
-
+    setPrevious (coordinates: Vector): void {
+      previous = coordinates
+    },
     async click (selector?: string | ElementHandle, options?: ClickOptions): Promise<void> {
       actions.toggleRandomMove(false)
 
-      if (selector !== undefined) {
+      if (selector != null) {
         await actions.move(selector, options)
         actions.toggleRandomMove(false)
       }
@@ -184,9 +194,9 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
       }
 
       if (options?.moveDelay !== undefined && options.moveDelay >= 0) {
-        await delay(Math.random() * options.moveDelay)
+        await delay(randomRange(0.5, 1) * options.moveDelay)
       } else {
-        await delay(Math.random() * 2000) // 2s by default
+        await delay(randomRange(0.5, 1) * 1000) // 1s by default
       }
 
       actions.toggleRandomMove(true)
@@ -237,12 +247,12 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
       const { height, width } = box
       const destination = getRandomBoxPoint(box, options)
       const dimensions = { height, width }
-      const overshooting = shouldOvershoot(previous, destination)
+      const overshooting = shouldOvershoot(previous, destination) && !((options?.noOvershoot) ?? false)
       const to = overshooting ? overshoot(destination, overshootRadius) : destination
       await tracePath(path(previous, to))
 
       if (overshooting) {
-        const correction = path(to, { ...dimensions, ...destination }, overshootSpread)
+        const correction = path(to, { ...dimensions, ...destination }, { ...options, spreadMultiplier: 0.2 })
 
         await tracePath(correction)
       }
